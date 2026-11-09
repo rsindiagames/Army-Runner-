@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>RS RUNNER - Holi Railway</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101827;font-family:Arial,sans-serif;touch-action:none}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;color:white;font-weight:800;text-shadow:0 2px 5px #000;font-size:18px;pointer-events:none}
+#brand{position:fixed;top:50px;left:0;right:0;text-align:center;color:#ffd447;font-weight:900;letter-spacing:3px;text-shadow:0 3px 8px #000;pointer-events:none}
+#controls{position:fixed;bottom:18px;left:0;right:0;display:flex;justify-content:space-evenly;align-items:center}
+button{border:2px solid #fff8;background:#172b49cc;color:white;border-radius:18px;width:76px;height:64px;font-size:27px;font-weight:900;box-shadow:0 4px 0 #081322;touch-action:none}
+#overlay{position:fixed;inset:0;background:#06101dcc;display:flex;align-items:center;justify-content:center;color:white;text-align:center;padding:24px}
+.panel{max-width:340px;background:#14243b;border:2px solid #ffd447;border-radius:22px;padding:25px;box-shadow:0 12px 40px #0009}
+h1{color:#ffd447;letter-spacing:3px;margin:0 0 8px;font-size:34px}
+#start{width:auto;height:auto;padding:14px 30px;background:#ffd447;color:#17243a;border:0;font-size:18px;margin-top:14px}
+.small{font-size:13px;color:#c7d4e7;line-height:1.5}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"><span>🪙 <span id="coins">0</span></span><span>SCORE: <span id="score">0</span></span></div>
+<div id="brand">RS INDIA PRESENTS</div>
+<div id="controls">
+<button id="left">◀</button><button id="jump">⬆</button><button id="right">▶</button>
+</div>
+<div id="overlay"><div class="panel"><h1>RS RUNNER</h1><div style="color:#ffd447;font-weight:bold">A GAME BY RS INDIA</div><p>तीन रेल-पटरियों पर दौड़ो, सिक्के जमा करो और सामने आती ट्रेन से बचो!</p><p class="small">मोबाइल टच: ◀ ▶ से पटरी बदलें, ⬆ से कूदें। स्क्रीन पर swipe भी कर सकते हैं। चारों ओर होली के रंगों वाला माहौल!</p><button id="start">खेल शुरू करें</button></div></div>
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+let W,H,dpr,playing=false,over=false,lane=1,playerY=0,vy=0,score=0,coins=0,speed=0.34,objects=[],spawn=0,last=0;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;c.width=W*dpr;c.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}addEventListener('resize',resize);resize();
+function road(t){let horizon=H*.28,bottom=H*1.04;return {x:W*.5+(0),y:horizon+(bottom-horizon)*t,w:W*(.10+.88*t)}}
+function laneX(l,t){let r=road(t);return W*.5+(l-1)*r.w*.29}
+function draw(){
+ctx.clearRect(0,0,W,H);
+let sky=ctx.createLinearGradient(0,0,0,H*.55);sky.addColorStop(0,'#55b8ed');sky.addColorStop(1,'#d8efff');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H*.55);
+ctx.fillStyle='#6cbd68';ctx.fillRect(0,H*.28,W,H*.72);
+// Holi-colour side festival scenery
+for(let i=0;i<18;i++){
+  let x=(i*97)%W, y=H*.34+(i*53%(H*.48));
+  let rad=7+(i*11%17);
+  ctx.globalAlpha=.72;
+  ctx.fillStyle=['#ff4fa3','#ffd447','#39d6d0','#9b68ff','#ff813d'][i%5];
+  ctx.beginPath();ctx.arc(x,y,rad,0,Math.PI*2);ctx.fill();
+}
+ctx.globalAlpha=1;
+// Holi flags along both sides
+for(let side of [0,1]) for(let i=0;i<7;i++){
+  let x=side===0?W*.035+i*W*.012:W*.965-i*W*.012, y=H*.36+i*H*.075;
+  ctx.strokeStyle='#65452e';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+25);ctx.stroke();
+  ctx.fillStyle=['#ff4fa3','#ffd447','#39d6d0','#9b68ff'][i%4];
+  ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(side===0?15:-15),y+5);ctx.lineTo(x,y+11);ctx.fill();
+}
+// distant city
+for(let i=0;i<12;i++){let x=i*W/10-W*.08,b=H*.31,h=35+(i*37%75);ctx.fillStyle=i%2?'#6e8796':'#8ca1a9';ctx.fillRect(x,b-h,W*.075,h);ctx.fillStyle='#f7df9c';for(let j=0;j<3;j++)ctx.fillRect(x+8+j*12,b-h+12,W*.012,7)}
+let top=road(0),bot=road(1);
+ctx.fillStyle='#48515d';ctx.beginPath();ctx.moveTo(W*.45,H*.28);ctx.lineTo(W*.55,H*.28);ctx.lineTo(W*.98,H);ctx.lineTo(W*.02,H);ctx.closePath();ctx.fill();
+// Three railway lanes with sleepers and twin rails per lane
+let stripe=(performance.now()/1000*speed*1.7)%1;
+for(let l=0;l<3;l++){
+  for(let side of [-1,1]){
+    ctx.strokeStyle='#c8d0d8';ctx.lineWidth=1.5+3.5*.65;
+    ctx.beginPath();ctx.moveTo(laneX(l,.02)+side*road(.02).w*.045,road(.02).y);
+    ctx.lineTo(laneX(l,1)+side*road(1).w*.045,road(1).y);ctx.stroke();
+  }
+}
+for(let i=0;i<13;i++){
+  let t=(i/13+stripe)%1,r=road(t);
+  for(let l=0;l<3;l++){
+    let x=laneX(l,t), half=r.w*.105;
+    ctx.strokeStyle='#8b6848';ctx.lineWidth=2+8*t;
+    ctx.beginPath();ctx.moveTo(x-half,r.y);ctx.lineTo(x+half,r.y);ctx.stroke();
+  }
+}
+objects.forEach(o=>{let t=o.z,r=road(t),x=laneX(o.lane,t),s=.25+1.15*t;
+if(o.type==='coin'){ctx.fillStyle='#ffd52e';ctx.beginPath();ctx.ellipse(x,r.y-22*s,9*s,13*s,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff3a3';ctx.lineWidth=2*s;ctx.stroke()}
+else if(o.type==='train'){
+  // Approaching colourful train obstacle on the railway
+  ctx.fillStyle='#d93636';ctx.fillRect(x-27*s,r.y-67*s,54*s,67*s);
+  ctx.fillStyle='#f5f1dc';ctx.fillRect(x-20*s,r.y-54*s,40*s,23*s);
+  ctx.fillStyle='#26384b';ctx.fillRect(x-16*s,r.y-50*s,13*s,15*s);ctx.fillRect(x+3*s,r.y-50*s,13*s,15*s);
+  ctx.fillStyle='#ffd447';ctx.fillRect(x-23*s,r.y-12*s,46*s,5*s);
+  ctx.fillStyle='#222';ctx.beginPath();ctx.arc(x-16*s,r.y-2*s,6*s,0,Math.PI*2);ctx.arc(x+16*s,r.y-2*s,6*s,0,Math.PI*2);ctx.fill();
+}else{ctx.fillStyle='#ed8b28';ctx.fillRect(x-18*s,r.y-42*s,36*s,42*s);ctx.fillStyle='#28394b';ctx.fillRect(x-12*s,r.y-34*s,24*s,12*s);ctx.fillStyle='#ffd7a0';ctx.fillRect(x-15*s,r.y-5*s,30*s,5*s)}
+});
+let px=laneX(lane,.88),py=H*.80-playerY;
+ctx.fillStyle='#15263b';ctx.beginPath();ctx.ellipse(px,py+29,20,7,0,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#ffd447';ctx.fillRect(px-12,py-34,24,37);ctx.fillStyle='#f2bd91';ctx.beginPath();ctx.arc(px,py-44,12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#24364b';ctx.fillRect(px-12,py-55,24,9);
+ctx.strokeStyle='#15263b';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(px-7,py+1);ctx.lineTo(px-12,py+16);ctx.moveTo(px+7,py+1);ctx.lineTo(px+12,py+16);ctx.stroke();
+}
+function spawnObj(){let l=Math.floor(Math.random()*3);let roll=Math.random(), type=roll<.48?'coin':(roll<.80?'block':'train');objects.push({lane:l,type,z:0});if(Math.random()<.25)objects.push({lane:(l+1)%3,type:'coin',z:-.18})}
+function end(){playing=false;over=true;document.querySelector('#overlay').style.display='flex';document.querySelector('.panel').innerHTML=`<h1>GAME OVER</h1><p>तुम्हारा स्कोर: <b>${score}</b></p><p>जमा सिक्के: <b>${coins}</b></p><button id="start">फिर से खेलें</button><p class="small">RS RUNNER • A GAME BY RS INDIA</p>`;document.getElementById('start').onclick=start}
+function update(dt){if(!playing)return;score+=Math.floor(dt*12);speed=Math.min(.62,.34+score/5000);spawn-=dt;if(spawn<=0){spawnObj();spawn=.85+Math.random()*.55}
+objects.forEach(o=>o.z+=dt*speed);objects=objects.filter(o=>o.z<1.12);
+for(let i=objects.length-1;i>=0;i--){let o=objects[i];if(o.z>.82&&o.z<.94&&o.lane===lane){if(o.type==='coin'){coins++;objects.splice(i,1)}else if(playerY<32){end();break}else objects.splice(i,1)}}
+if(playerY>0){playerY+=vy*dt;vy-=900*dt;if(playerY<=0){playerY=0;vy=0}}
+document.getElementById('score').textContent=score;document.getElementById('coins').textContent=coins}
+function loop(t){let dt=Math.min((t-last)/1000||0,.04);last=t;update(dt);draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+function start(){lane=1;playerY=0;vy=0;score=0;coins=0;speed=.34;objects=[];spawn=.5;over=false;playing=true;document.getElementById('overlay').style.display='none';document.getElementById('score').textContent='0';document.getElementById('coins').textContent='0'}
+function move(d){if(playing)lane=Math.max(0,Math.min(2,lane+d))}
+function jump(){if(playing&&playerY===0)vy=470}
+document.getElementById('left').onpointerdown=e=>{e.preventDefault();move(-1)};document.getElementById('right').onpointerdown=e=>{e.preventDefault();move(1)};document.getElementById('jump').onpointerdown=e=>{e.preventDefault();jump()};
+document.getElementById('start').onclick=start;
+let sx=0,sy=0;c.addEventListener('pointerdown',e=>{sx=e.clientX;sy=e.clientY});c.addEventListener('pointerup',e=>{let dx=e.clientX-sx,dy=e.clientY-sy;if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy))move(dx>0?1:-1);else if(dy< -25)jump()});
+addEventListener('keydown',e=>{if(e.key==='ArrowLeft')move(-1);if(e.key==='ArrowRight')move(1);if(e.key===' '||e.key==='ArrowUp')jump()});
+</script>
+</body></html>
